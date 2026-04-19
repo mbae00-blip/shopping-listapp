@@ -196,12 +196,18 @@
     </div>
   </div>
 
-  <script>
-    let items = JSON.parse(localStorage.getItem('shoppingList') || '[]');
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const SUPABASE_URL = 'https://ffbdvmckfeexlxpmtjxr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmYmR2bWNrZmVleGx4cG10anhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1NzQ3NjMsImV4cCI6MjA5MjE1MDc2M30.9PfAfou54kYatF9OrTLiVllG8HBi5zIlEvUQZCL-B-I';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let items = [];
     let filter = 'all';
 
-    function save() {
-      localStorage.setItem('shoppingList', JSON.stringify(items));
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function updateStats() {
@@ -224,9 +230,9 @@
       } else {
         ul.innerHTML = visible.map(item => `
           <li class="${item.checked ? 'checked' : ''}" data-id="${item.id}">
-            <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggle(${item.id})">
+            <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="window._toggle('${item.id}')">
             <span class="item-text">${escHtml(item.text)}</span>
-            <button class="delete-btn" onclick="remove(${item.id})" title="삭제">✕</button>
+            <button class="delete-btn" onclick="window._remove('${item.id}')" title="삭제">✕</button>
           </li>
         `).join('');
       }
@@ -234,37 +240,67 @@
       updateStats();
     }
 
-    function escHtml(s) {
-      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    async function loadItems() {
+      const { data, error } = await supabase
+        .from('Shopping_Items')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) { console.error(error); return; }
+      items = data;
+      render();
     }
 
-    function addItem() {
+    async function addItem() {
       const input = document.getElementById('newItem');
       const text = input.value.trim();
       if (!text) return;
-      items.unshift({ id: crypto.randomUUID(), text, checked: false });
+      const { data, error } = await supabase
+        .from('Shopping_Items')
+        .insert({ text, checked: false })
+        .select()
+        .single();
+      if (error) { console.error(error); return; }
+      items.unshift(data);
       input.value = '';
-      save();
       render();
       input.focus();
     }
 
-    function toggle(id) {
+    async function toggle(id) {
       const item = items.find(i => i.id === id);
-      if (item) item.checked = !item.checked;
-      save();
+      if (!item) return;
+      item.checked = !item.checked;
       render();
+      const { error } = await supabase
+        .from('Shopping_Items')
+        .update({ checked: item.checked })
+        .eq('id', id);
+      if (error) {
+        item.checked = !item.checked;
+        console.error(error);
+        render();
+      }
     }
 
-    function remove(id) {
+    async function remove(id) {
+      const { error } = await supabase
+        .from('Shopping_Items')
+        .delete()
+        .eq('id', id);
+      if (error) { console.error(error); return; }
       items = items.filter(i => i.id !== id);
-      save();
       render();
     }
 
-    function clearChecked() {
+    async function clearChecked() {
+      const checkedIds = items.filter(i => i.checked).map(i => i.id);
+      if (checkedIds.length === 0) return;
+      const { error } = await supabase
+        .from('Shopping_Items')
+        .delete()
+        .in('id', checkedIds);
+      if (error) { console.error(error); return; }
       items = items.filter(i => !i.checked);
-      save();
       render();
     }
 
@@ -275,11 +311,17 @@
       render();
     }
 
+    window._toggle = toggle;
+    window._remove = remove;
+    window.addItem = addItem;
+    window.clearChecked = clearChecked;
+    window.setFilter = setFilter;
+
     document.getElementById('newItem').addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.isComposing) addItem();
     });
 
-    render();
+    loadItems();
   </script>
 </body>
 </html>
